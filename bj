@@ -1,0 +1,107 @@
+import random
+from pymongo import MongoClient
+
+# Define cards and their values
+cards = {'A': 11, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 10, 'Q': 10, 'K': 10}
+
+# Function to deal a card
+def deal_card():
+    return random.choice(list(cards.keys()))
+
+# Function to calculate the score of a hand
+def calculate_score(hand):
+    score = sum(cards[card] for card in hand)
+    aces = hand.count('A')
+    while score > 21 and aces:
+        score -= 10
+        aces -= 1
+    return score
+
+# MongoDB connection
+client = MongoClient('') # Input MongoDB url (DONT FORGET ABOUT <password>!), or remove the mongoDB part if you don't want logging
+db = client['Bj']
+scores_collection = db['scores']
+
+# Introduction to the Game
+print("Welcome to my blackjack table! Please take a seat.")
+print("Type 1 to take a seat.")
+print("Type 2 to exit.")
+
+def bj():
+    # Game setup: Number of players and initial dealing of cards
+    while True:
+        intr = input(">>> ")
+        if intr == "1":
+            seats = input("How many seats do you want to take? (max is 3)\n")
+            if 1 <= int(seats) <= 3:
+                break
+            else:
+                print("Invalid number of seats. Please choose between 1 and 3.\n")
+        elif intr == "2":
+            quit()
+        else:
+            print("Invalid input.\n")
+
+    players_hand = {i: [deal_card() for _ in range(2)] for i in range(1, int(seats) + 1)}
+    dealer_hand = [deal_card() for _ in range(2)]
+    print(f"Dealing cards for {seats} players...\n")
+
+    # Display initial hands
+    for i in players_hand:
+        print(f"Player {i}'s hand: {players_hand[i]}")
+    print(f"Dealer's hand: {dealer_hand[:-1]} and HIDDEN\n")
+
+    # Player turns: Hit or Stand
+    for i in players_hand:
+        print(f"Player {i}'s turn")
+        while True:
+            hit_or_stand = input("Type 'h' to hit or 's' to stand: ").lower()
+            if hit_or_stand == 'h':
+                players_hand[i].append(deal_card())
+                print(f"Player {i}: {players_hand[i]}")
+                if calculate_score(players_hand[i]) > 21:
+                    print(f"Bust! Player {i} score: {calculate_score(players_hand[i])}")
+                    players_hand[i] = []
+                    break
+            elif hit_or_stand == 's':
+                print(f"Player {i} score: {calculate_score(players_hand[i])}")
+                break
+            else:
+                print("Invalid input.\n")
+
+    # Dealer's turn: Hits until reaching 17 or busting
+    print("Dealer's turn")
+    while calculate_score(dealer_hand) < 17:
+        dealer_hand.append(deal_card())
+    print(f"Dealer: {dealer_hand}")
+
+    # Determine the final scores and results
+    final_scores = {
+        f'player_{i}': calculate_score(players_hand.get(i, [])) for i in range(1, int(seats) + 1)
+    }
+    final_scores['dealer'] = calculate_score(dealer_hand)
+
+    # Display results and insert the scores into MongoDB
+    for player, score in final_scores.items():
+        result = (
+            'Lost' if score > 21 else
+            'Won (Blackjack!)' if score == 21 and len(players_hand[int(player.split('_')[1])]) == 2 else
+            'Won' if score > calculate_score(dealer_hand) or calculate_score(dealer_hand) > 21 else
+            'Tied' if score == calculate_score(dealer_hand) else 'Lost'
+        )
+        print(f"{player.capitalize()} {result} with a score of {score}\n")
+
+        # Insert the score into MongoDB
+        score_data = {'player': player, 'score': score, 'result': result}
+        scores_collection.insert_one(score_data)
+
+        # Log the changelog
+        print("Changelog:")
+        print(f"Player {player.capitalize()}: {result} with a score of {score}")
+
+if __name__ == "__main__":
+    while True:
+        bj()
+        play_again = input("Do you want to play again? (yes/no) ").lower()
+        if play_again != 'yes':
+            break
